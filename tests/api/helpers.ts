@@ -21,6 +21,7 @@ export const TEST_INIT_SECRET = 'test-init-secret';
 export interface CallInit {
   method?: string;
   body?: unknown;
+  formData?: FormData;
   /** 显式指定 Cookie（默认使用会话中保存的 Cookie） */
   cookie?: string | null;
   csrf?: string | null;
@@ -79,7 +80,7 @@ export function createHarness(options: HarnessOptions = {}): Harness {
   }
 
   async function call(path: string, init: CallInit = {}): Promise<Response> {
-    const method = init.method ?? (init.body === undefined && init.rawBody === undefined ? 'GET' : 'POST');
+    const method = init.method ?? (init.body === undefined && init.formData === undefined && init.rawBody === undefined ? 'GET' : 'POST');
     const headers: Record<string, string> = { ...(init.headers ?? {}) };
     const origin = init.origin === undefined ? ORIGIN : init.origin;
     // Host 始终指向真实站点：跨站请求不会把 Host 改成攻击者的域名
@@ -88,15 +89,16 @@ export function createHarness(options: HarnessOptions = {}): Harness {
       headers.origin = origin;
     }
     if (method !== 'GET' && method !== 'HEAD') {
-      const contentType = init.contentType === undefined ? 'application/json' : init.contentType;
+      const contentType = init.contentType === undefined ? (init.formData ? null : 'application/json') : init.contentType;
       if (contentType) headers['content-type'] = contentType;
     }
     const activeCookie = init.cookie === undefined ? cookie : init.cookie;
     if (activeCookie) headers.cookie = activeCookie;
     const activeCsrf = init.csrf === undefined ? csrfToken : init.csrf;
     if (activeCsrf) headers['x-csrf-token'] = activeCsrf;
-    let body: string | undefined;
+    let body: BodyInit | undefined;
     if (init.rawBody !== undefined) body = init.rawBody;
+    else if (init.formData !== undefined) body = init.formData;
     else if (init.body !== undefined) body = JSON.stringify(init.body);
     const response = await handler(new Request(`${ORIGIN}${path}`, { method, headers, body }), env);
     captureCookies(response);
@@ -191,6 +193,7 @@ export async function resetDatabase(): Promise<void> {
     env.DB.prepare('DELETE FROM login_attempts'),
     env.DB.prepare('DELETE FROM admin_users'),
     env.DB.prepare('DELETE FROM settings'),
+    env.DB.prepare('DELETE FROM wallpaper_image'),
     env.DB.prepare("INSERT INTO settings (id, settings_json, updated_at) VALUES (1, '{}', '2026-03-01T00:00:00.000Z')"),
     env.DB.prepare("UPDATE app_meta SET revision = 0, updated_at = '2026-03-01T00:00:00.000Z' WHERE id = 1"),
   ]);

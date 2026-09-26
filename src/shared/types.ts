@@ -9,12 +9,23 @@ export type SearchEngine = 'baidu' | 'google' | 'bing';
 export type IconType = 'auto' | 'builtin' | 'image' | 'favicon';
 export type LinkTarget = '_self' | '_blank';
 export type GroupDeleteMode = 'migrate' | 'cascade';
+export type WallpaperMode = 'url' | 'upload';
 
 export interface AppSettings {
   siteTitle: string;
   siteSubtitle: string;
   /** 自定义壁纸地址；为空时使用内置渐变壁纸 */
   wallpaperUrl: string;
+  /** 壁纸来源 */
+  wallpaperMode: WallpaperMode;
+  /** 桌面壁纸主体位置与放大倍数 */
+  wallpaperDesktopX: number;
+  wallpaperDesktopY: number;
+  wallpaperDesktopZoom: number;
+  /** 手机壁纸主体位置与放大倍数 */
+  wallpaperMobileX: number;
+  wallpaperMobileY: number;
+  wallpaperMobileZoom: number;
   /** 壁纸遮罩不透明度 0 ~ 0.9 */
   overlayOpacity: number;
   /** 卡片背景不透明度 0.05 ~ 1 */
@@ -87,6 +98,11 @@ export interface BackupFile {
   settings: AppSettings;
   groups: BackupGroup[];
   links: BackupLink[];
+  /** 可选上传壁纸图片；最大 1 MB，使用 Base64 编码 */
+  wallpaperImage?: {
+    mimeType: string;
+    dataBase64: string;
+  };
 }
 
 export interface ImportLinkInput {

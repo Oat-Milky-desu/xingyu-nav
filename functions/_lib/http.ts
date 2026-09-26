@@ -139,6 +139,13 @@ export function assertJsonContentType(request: Request): void {
   }
 }
 
+export function assertMultipartContentType(request: Request): void {
+  const contentType = request.headers.get('content-type') ?? '';
+  if (!/^multipart\/form-data\s*;\s*boundary=/i.test(contentType)) {
+    throw new HttpError(415, 'unsupported_media_type', '请求必须使用 multipart/form-data');
+  }
+}
+
 /**
  * 同源校验：所有非安全方法都必须来自本站页面。
  * 比较完整的 origin（协议 + 主机 + 端口），协议或端口不同即拒绝。

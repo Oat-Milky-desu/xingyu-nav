@@ -26,6 +26,11 @@ export interface LinkRow {
   updated_at: string;
 }
 
+export interface WallpaperImageRow {
+  mime_type: string;
+  image: ArrayBuffer | Uint8Array;
+}
+
 export const REVISION_GUARD_TABLE = 'revision_guard';
 export const EXISTENCE_GUARD_TABLE = 'existence_guard';
 export const VALIDATION_GUARD_TABLE = 'validation_guard';
@@ -227,17 +232,12 @@ function parseSettingsRow(row: { settings_json: string } | undefined): AppSettin
   }
 }
 
-/**
- * 一次性读取完整内容。使用单个 db.batch() 获得一致性快照：
- * 并发写入不可能让内容、设置与版本号来自不同时间点（备份导出因此也是一致的）。
- */
-export async function getContent(db: D1Database): Promise<ContentPayload> {
-  const [metaResult, settingsResult, groupResult, linkResult] = await db.batch([
-    db.prepare('SELECT revision FROM app_meta WHERE id = 1'),
-    db.prepare('SELECT settings_json FROM settings WHERE id = 1'),
-    db.prepare('SELECT * FROM groups ORDER BY position ASC, created_at ASC'),
-    db.prepare('SELECT * FROM links ORDER BY position ASC, created_at ASC'),
-  ]);
+function buildContentPayload(
+  metaResult: { results?: unknown[] } | undefined,
+  settingsResult: { results?: unknown[] } | undefined,
+  groupResult: { results?: unknown[] } | undefined,
+  linkResult: { results?: unknown[] } | undefined,
+): ContentPayload {
   const revision = (metaResult?.results?.[0] as { revision: number } | undefined)?.revision ?? 0;
   const settings = parseSettingsRow(settingsResult?.results?.[0] as { settings_json: string } | undefined);
   const groupRows = (groupResult?.results ?? []) as unknown as GroupRow[];
@@ -255,6 +255,43 @@ export async function getContent(db: D1Database): Promise<ContentPayload> {
     links: linksByGroup.get(row.id) ?? [],
   }));
   return { revision, settings, groups };
+}
+
+/**
+ * 一次性读取完整内容。使用单个 db.batch() 获得一致性快照：
+ * 并发写入不可能让内容、设置与版本号来自不同时间点（备份导出因此也是一致的）。
+ */
+export async function getContent(db: D1Database): Promise<ContentPayload> {
+  const [metaResult, settingsResult, groupResult, linkResult] = await db.batch([
+    db.prepare('SELECT revision FROM app_meta WHERE id = 1'),
+    db.prepare('SELECT settings_json FROM settings WHERE id = 1'),
+    db.prepare('SELECT * FROM groups ORDER BY position ASC, created_at ASC'),
+    db.prepare('SELECT * FROM links ORDER BY position ASC, created_at ASC'),
+  ]);
+  return buildContentPayload(metaResult, settingsResult, groupResult, linkResult);
+}
+
+/** Read the wallpaper image for the authenticated image endpoint. */
+export async function getWallpaperImage(db: D1Database): Promise<WallpaperImageRow | null> {
+  return db.prepare('SELECT mime_type, image FROM wallpaper_image WHERE id = 1').first<WallpaperImageRow>();
+}
+
+/**
+ * Read backup data and its optional image from one D1 batch so a concurrent upload
+ * cannot pair an image with settings or a revision from another snapshot.
+ */
+export async function getBackupSnapshot(
+  db: D1Database,
+): Promise<{ content: ContentPayload; wallpaperImage: WallpaperImageRow | null }> {
+  const [metaResult, settingsResult, groupResult, linkResult, wallpaperResult] = await db.batch([
+    db.prepare('SELECT revision FROM app_meta WHERE id = 1'),
+    db.prepare('SELECT settings_json FROM settings WHERE id = 1'),
+    db.prepare('SELECT * FROM groups ORDER BY position ASC, created_at ASC'),
+    db.prepare('SELECT * FROM links ORDER BY position ASC, created_at ASC'),
+    db.prepare('SELECT mime_type, image FROM wallpaper_image WHERE id = 1'),
+  ]);
+  const wallpaperImage = (wallpaperResult?.results?.[0] as WallpaperImageRow | undefined) ?? null;
+  return { content: buildContentPayload(metaResult, settingsResult, groupResult, linkResult), wallpaperImage };
 }
 
 export async function getGroupRow(db: D1Database, id: string): Promise<GroupRow | null> {

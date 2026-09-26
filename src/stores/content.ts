@@ -314,6 +314,22 @@ export async function saveSettings(settings: AppSettings, revision: number): Pro
   contentState.settings = { ...result.settings };
 }
 
+/** Save a replacement wallpaper and its settings in the same revision-checked request. */
+export async function saveWallpaper(file: File, settings: AppSettings, revision: number): Promise<void> {
+  const formData = new FormData();
+  formData.set('revision', String(revision));
+  formData.set('settings', JSON.stringify(settings));
+  formData.set('image', file, file.name);
+  const result = await mutate(() =>
+    apiRequest<{ revision: number; settings: AppSettings }>('/api/wallpaper', {
+      method: 'PUT',
+      body: formData,
+    }),
+  );
+  contentState.revision = result.revision;
+  contentState.settings = { ...result.settings };
+}
+
 /* --------------------------- 备份 / 恢复 / 导入 --------------------------- */
 
 export async function exportBackup(): Promise<BackupFile> {

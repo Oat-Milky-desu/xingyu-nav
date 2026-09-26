@@ -6,6 +6,7 @@ import {
   HttpError,
   UNSAFE_METHODS,
   assertJsonContentType,
+  assertMultipartContentType,
   assertSameOrigin,
   errorResponse,
   methodNotAllowed,
@@ -25,12 +26,15 @@ import {
   handleUpdateSettings,
 } from './handlers-content';
 import { handleExportBackup, handleImport, handleRestoreBackup } from './handlers-data';
+import { handleGetWallpaper, handlePutWallpaper } from './handlers-wallpaper';
 
 interface RouteDefinition {
   method: string;
   /** 相对于 /api 的模式，例如 groups/:id */
   pattern: string;
   auth: boolean;
+  /** 仅个别端点接受 multipart；其它写接口一律保持 JSON。 */
+  contentType?: 'multipart';
   handler: (ctx: Ctx) => Promise<Response>;
 }
 
@@ -50,6 +54,8 @@ export const ROUTES: RouteDefinition[] = [
   { method: 'PATCH', pattern: 'links/:id', auth: true, handler: handleUpdateLink },
   { method: 'DELETE', pattern: 'links/:id', auth: true, handler: handleDeleteLink },
   { method: 'PUT', pattern: 'settings', auth: true, handler: handleUpdateSettings },
+  { method: 'GET', pattern: 'wallpaper', auth: true, handler: handleGetWallpaper },
+  { method: 'PUT', pattern: 'wallpaper', auth: true, contentType: 'multipart', handler: handlePutWallpaper },
   { method: 'GET', pattern: 'backup', auth: true, handler: handleExportBackup },
   { method: 'POST', pattern: 'restore', auth: true, handler: handleRestoreBackup },
   { method: 'POST', pattern: 'import', auth: true, handler: handleImport },
@@ -103,7 +109,8 @@ export function createApiHandler(options: ApiOptions = {}) {
     const unsafe = UNSAFE_METHODS.has(method);
     if (unsafe) {
       assertSameOrigin(request, url, options.devOrigin ?? env.DEV_ORIGIN);
-      assertJsonContentType(request);
+      if (route.contentType === 'multipart') assertMultipartContentType(request);
+      else assertJsonContentType(request);
     }
 
     if (!route.auth) {

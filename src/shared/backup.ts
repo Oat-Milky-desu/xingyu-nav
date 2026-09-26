@@ -35,6 +35,24 @@ const linkShape = {
 
 const groupField = object(groupShape);
 const linkField = object(linkShape);
+const wallpaperImageField = object({
+  mimeType: oneOf(['image/jpeg', 'image/png', 'image/webp'] as const, '壁纸图片类型'),
+  dataBase64: new Field<string>((value, ctx) => {
+    const invalid = (message: string): undefined => {
+      ctx.issues.push({ path: ctx.path, message });
+      ctx.failed = true;
+      return undefined;
+    };
+    if (typeof value !== 'string') return invalid('应为 Base64 壁纸数据');
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+      return invalid('壁纸数据不是合法的 Base64');
+    }
+    const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+    const byteLength = (value.length * 3) / 4 - padding;
+    if (byteLength < 1 || byteLength > 1_000_000) return invalid('壁纸图片大小必须在 1 字节至 1 MB 之间');
+    return value;
+  }, false, 'Base64 壁纸数据'),
+});
 const backupShape = {
   format: oneOf([BACKUP_FORMAT] as const, '备份格式'),
   version: num({ min: 1, max: BACKUP_VERSION, integer: true, label: '备份版本' }),
@@ -42,6 +60,7 @@ const backupShape = {
   settings: settingsField,
   groups: list(groupField as Field<unknown>, { max: MAX_BACKUP_GROUPS, label: '分组列表' }),
   links: list(linkField as Field<unknown>, { max: MAX_BACKUP_LINKS, label: '链接列表' }),
+  wallpaperImage: wallpaperImageField.optional(),
 };
 
 export const backupField: Field<BackupFile> = new Field<BackupFile>((value, ctx) => {

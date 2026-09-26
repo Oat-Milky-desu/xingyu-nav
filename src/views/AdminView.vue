@@ -8,10 +8,11 @@ import AdminImportSection from '../components/admin/AdminImportSection.vue';
 import AdminSecuritySection from '../components/admin/AdminSecuritySection.vue';
 import AdminSiteSection from '../components/admin/AdminSiteSection.vue';
 import type { AppSettings } from '../shared/types';
-import { contentState, loadContent, saveSettings } from '../stores/content';
-import { clearPreview, setPreview } from '../stores/preview';
+import { contentState, loadContent, saveSettings, saveWallpaper } from '../stores/content';
+import { clearPreview, setPreview, setWallpaperPreview } from '../stores/preview';
 import { logoutRequest, sessionState } from '../stores/session';
 import { requestConfirm, toastError, toastSuccess } from '../stores/ui';
+import { optimizeWallpaper } from '../utils/wallpaper';
 
 type TabId = 'site' | 'appearance' | 'security' | 'backup' | 'import';
 
@@ -27,15 +28,62 @@ const router = useRouter();
 const activeTab = ref<TabId>('site');
 const draft = ref<AppSettings>({ ...contentState.settings });
 const baseline = ref<AppSettings>({ ...contentState.settings });
+const pendingWallpaper = ref<File | null>(null);
+const pendingWallpaperUrl = ref<string | null>(null);
+const wallpaperProcessing = ref(false);
+const appearanceKey = ref(0);
+let wallpaperProcessingId = 0;
 /** 草稿对应的已保存版本号：保存时用它做乐观并发检查，避免覆盖其它设备的新修改 */
 const baselineRevision = ref(0);
 const saving = ref(false);
 const saveError = ref('');
 const externalNotice = ref('');
 
-const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(baseline.value));
+const dirty = computed(
+  () =>
+    JSON.stringify(draft.value) !== JSON.stringify(baseline.value) ||
+    pendingWallpaper.value !== null ||
+    wallpaperProcessing.value,
+);
+const uploadNeedsImage = computed(
+  () => draft.value.wallpaperMode === 'upload' && baseline.value.wallpaperMode !== 'upload' && !pendingWallpaper.value,
+);
+
+function setPendingWallpaper(file: File): void {
+  clearPendingWallpaper();
+  pendingWallpaper.value = file;
+  pendingWallpaperUrl.value = URL.createObjectURL(file);
+  setWallpaperPreview(pendingWallpaperUrl.value);
+}
+
+function clearPendingWallpaper(): void {
+  if (pendingWallpaperUrl.value) URL.revokeObjectURL(pendingWallpaperUrl.value);
+  pendingWallpaperUrl.value = null;
+  pendingWallpaper.value = null;
+  setWallpaperPreview(null);
+}
+
+async function processWallpaper(file: File): Promise<void> {
+  const processingId = ++wallpaperProcessingId;
+  wallpaperProcessing.value = true;
+  saveError.value = '';
+  try {
+    const optimized = await optimizeWallpaper(file);
+    if (processingId !== wallpaperProcessingId) return;
+    setPendingWallpaper(optimized);
+    updateDraft({ wallpaperMode: 'upload' });
+  } catch (error) {
+    if (processingId === wallpaperProcessingId) saveError.value = errorText(error);
+  } finally {
+    if (processingId === wallpaperProcessingId) wallpaperProcessing.value = false;
+  }
+}
 
 function syncFromState(): void {
+  wallpaperProcessingId += 1;
+  clearPendingWallpaper();
+  wallpaperProcessing.value = false;
+  appearanceKey.value += 1;
   baseline.value = { ...contentState.settings };
   draft.value = { ...contentState.settings };
   baselineRevision.value = contentState.revision;
@@ -47,7 +95,11 @@ watch(
   draft,
   (value) => {
     // 草稿只写入独立的预览状态，contentState.settings 始终保持“已保存值”
-    if (JSON.stringify(value) !== JSON.stringify(baseline.value)) {
+    if (
+      JSON.stringify(value) !== JSON.stringify(baseline.value) ||
+      pendingWallpaper.value !== null ||
+      wallpaperProcessing.value
+    ) {
       setPreview(value);
     } else {
       clearPreview();
@@ -85,7 +137,10 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  wallpaperProcessingId += 1;
+  wallpaperProcessing.value = false;
   window.removeEventListener('beforeunload', onBeforeUnload);
+  clearPendingWallpaper();
   clearPreview();
 });
 
@@ -100,10 +155,23 @@ function updateDraft(patch: Partial<AppSettings>): void {
 }
 
 async function save(): Promise<boolean> {
+  if (wallpaperProcessing.value) {
+    saveError.value = '请等待图片处理完成后再保存。';
+    return false;
+  }
+  if (uploadNeedsImage.value) {
+    saveError.value = '请先选择要上传的壁纸图片。';
+    return false;
+  }
   saving.value = true;
   saveError.value = '';
   try {
-    await saveSettings(draft.value, baselineRevision.value);
+    const settings = { ...draft.value };
+    if (pendingWallpaper.value && settings.wallpaperMode === 'upload') {
+      await saveWallpaper(pendingWallpaper.value, settings, baselineRevision.value);
+    } else {
+      await saveSettings(settings, baselineRevision.value);
+    }
     syncFromState();
     toastSuccess('设置已保存');
     return true;
@@ -158,6 +226,7 @@ async function handleLogout(): Promise<void> {
 onBeforeRouteLeave(async () => {
   // 会话已失效 / 已登出时直接离开，不再弹出“未保存”询问
   if (!dirty.value || !sessionState.authenticated) {
+    clearPendingWallpaper();
     clearPreview();
     return true;
   }
@@ -213,7 +282,15 @@ onBeforeRouteLeave(async () => {
 
       <main id="main-content" class="admin-panel glass">
         <AdminSiteSection v-if="activeTab === 'site'" :settings="draft" @update="updateDraft" />
-        <AdminAppearanceSection v-else-if="activeTab === 'appearance'" :settings="draft" @update="updateDraft" />
+        <AdminAppearanceSection
+          v-else-if="activeTab === 'appearance'"
+          :key="appearanceKey"
+          :settings="draft"
+          :wallpaper-preview-url="pendingWallpaperUrl"
+          :wallpaper-processing="wallpaperProcessing"
+          @update="updateDraft"
+          @wallpaper-selected="processWallpaper"
+        />
         <AdminSecuritySection v-else-if="activeTab === 'security'" />
         <AdminBackupSection v-else-if="activeTab === 'backup'" />
         <AdminImportSection v-else />
@@ -226,13 +303,15 @@ onBeforeRouteLeave(async () => {
       role="region"
       aria-label="未保存的修改"
     >
-      <span>预览中，尚未保存</span>
+      <span v-if="wallpaperProcessing">正在处理壁纸图片…</span>
+      <span v-else-if="uploadNeedsImage">先选择壁纸图片才能保存</span>
+      <span v-else>预览中，尚未保存</span>
       <div class="row">
         <button v-if="externalNotice" type="button" class="btn btn-sm" :disabled="saving" @click="reloadLatest">
           加载最新
         </button>
         <button type="button" class="btn btn-sm" :disabled="saving" @click="discard">放弃修改</button>
-        <button type="button" class="btn btn-sm btn-primary" :disabled="saving" @click="save">
+        <button type="button" class="btn btn-sm btn-primary" :disabled="saving || wallpaperProcessing || uploadNeedsImage" @click="save">
           {{ saving ? '保存中…' : '保存设置' }}
         </button>
       </div>
