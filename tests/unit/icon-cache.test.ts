@@ -10,7 +10,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe('saved icon cache client', () => {
   it('only enables the cache for supported public automatic icons', () => {
     expect(supportsSavedIconCache('https://www.wikipedia.org/wiki/Main_Page', 'auto', '')).toBe(true);
-    expect(supportsSavedIconCache('https://www.wikipedia.org/', 'favicon', '')).toBe(true);
+    expect(supportsSavedIconCache('https://www.wikipedia.org/', 'favicon', '')).toBe(false);
     expect(supportsSavedIconCache('https://www.wikipedia.org/', 'favicon', 'https://cdn.example.org/icon.png')).toBe(false);
     expect(supportsSavedIconCache('https://nas.local/', 'auto', '')).toBe(false);
   });

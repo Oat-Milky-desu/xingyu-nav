@@ -63,6 +63,33 @@ describe('IconView favicon handling', () => {
     expect(wrapper.get('img').attributes('src')).toBe('/api/links/saved-link-1/icon?v=0');
   });
 
+  it('uses the same browser favicon candidate chain for saved and unsaved blank favicon mode', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const url = savedPublicLink.url;
+    const candidates = faviconCandidatesFor(url);
+    const unsaved = mountIcon({ iconType: 'favicon', iconValue: '', url });
+    const saved = mountIcon({ iconType: 'favicon', iconValue: '', linkId: savedPublicLink.id, url });
+
+    expect(unsaved.get('img').attributes('src')).toBe(candidates[0]);
+    expect(saved.get('img').attributes('src')).toBe(candidates[0]);
+    expect(candidates[0]).toBe('https://www.wikipedia.org/favicon.ico');
+
+    for (let index = 0; index < candidates.length; index += 1) {
+      await unsaved.get('img').trigger('error');
+      await saved.get('img').trigger('error');
+      await nextTick();
+      if (index + 1 < candidates.length) {
+        expect(unsaved.get('img').attributes('src')).toBe(candidates[index + 1]);
+        expect(saved.get('img').attributes('src')).toBe(candidates[index + 1]);
+      }
+    }
+
+    expect(unsaved.find('img').exists()).toBe(false);
+    expect(saved.find('img').exists()).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('resolves a failed saved icon once and does not loop after a decode failure', async () => {
     const fetchMock = vi.fn().mockResolvedValue(iconCacheResponse({ status: 'ready' }));
     vi.stubGlobal('fetch', fetchMock);
@@ -185,6 +212,8 @@ describe('IconView favicon handling', () => {
   });
 
   it('keeps custom image and nonempty favicon URLs exact and does not chain fallbacks', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
     const customImage = 'https://cdn.example.net/icons/site.png?size=128';
     const wrapper = mountIcon({ iconType: 'image', iconValue: customImage });
 
@@ -195,12 +224,27 @@ describe('IconView favicon handling', () => {
     expect(wrapper.get('.icon-initial').text()).toBe('E');
 
     const customFavicon = 'https://icons.example.net/custom.svg?theme=dark';
-    await wrapper.setProps({ iconType: 'favicon', iconValue: customFavicon });
+    await wrapper.setProps({ iconType: 'favicon', iconValue: customFavicon, linkId: 'saved-favicon-link' });
     expect(wrapper.get('img').attributes('src')).toBe(customFavicon);
     await wrapper.get('img').trigger('error');
     await nextTick();
     expect(wrapper.find('img').exists()).toBe(false);
     expect(wrapper.get('.icon-initial').text()).toBe('E');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not offer cache refresh for a saved blank favicon mode', () => {
+    const faviconLink: NavLink = {
+      ...savedPublicLink,
+      iconType: 'favicon',
+      iconValue: '',
+    };
+    const wrapper = mount(LinkCard, {
+      props: { link: faviconLink, index: 0, editing: true, canMoveUp: false, canMoveDown: false },
+    });
+    wrappers.push(wrapper);
+
+    expect(wrapper.find('button[title="刷新图标"]').exists()).toBe(false);
   });
 
   it('does not render a network image for built-in icons', () => {

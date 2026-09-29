@@ -27,7 +27,7 @@ const MODES: { value: IconType; label: string; hint: string }[] = [
   {
     value: 'favicon',
     label: '网站图标',
-    hint: '留空时自动获取并保存公开网站图标；填写地址则直接加载该图片。',
+    hint: '留空时优先使用网站自身的图标，与导航页显示一致；也可填写图片地址。',
   },
 ];
 
@@ -103,7 +103,7 @@ function selectMode(mode: IconType): void {
         :placeholder="iconType === 'favicon' ? '留空则自动读取站点 favicon' : 'https://example.com/logo.png'"
         @input="emit('update:iconValue', ($event.target as HTMLInputElement).value)"
       />
-      <span v-if="iconType === 'favicon'" class="field-hint">支持 http:// 或 https:// 地址。留空时自动获取并保存公开网站图标；填写地址则直接加载该图片。</span>
+      <span v-if="iconType === 'favicon'" class="field-hint">支持 http:// 或 https:// 地址；留空则自动读取网站图标。</span>
       <span v-else class="field-hint">仅支持 http:// 或 https:// 地址；自定义图标加载失败时显示名称首字母。</span>
     </div>
   </div>

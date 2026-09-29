@@ -61,7 +61,7 @@ function pumpQueue(): void {
   }
 }
 
-/** The saved automatic modes supported by the public icon cache. */
+/** Only automatic mode uses the saved public icon cache in the client. */
 export function supportsSavedIconCache(url: string, iconType: IconType, iconValue: string): boolean {
-  return (iconType === 'auto' || (iconType === 'favicon' && !iconValue)) && cachedHostname(url, iconType, iconValue) !== null;
+  return iconType === 'auto' && cachedHostname(url, iconType, iconValue) !== null;
 }
