@@ -39,6 +39,8 @@ describe('站点设置', () => {
   it('严格校验完整设置', () => {
     expect(parseSettings(DEFAULT_SETTINGS).siteTitle).toBe('星屿导航');
     expect(() => parseSettings({ ...DEFAULT_SETTINGS, overlayOpacity: 2 })).toThrowError(/不能大于/);
+    expect(() => parseSettings({ ...DEFAULT_SETTINGS, wallpaperDesktopX: 101 })).toThrowError(/不能大于/);
+    expect(() => parseSettings({ ...DEFAULT_SETTINGS, wallpaperMobileZoom: 0.9 })).toThrowError(/不能小于/);
     expect(() => parseSettings({ ...DEFAULT_SETTINGS, injected: true })).toThrowError(/未知字段/);
     expect(() => parseSettings({ ...DEFAULT_SETTINGS, wallpaperUrl: 'javascript:alert(1)' })).toThrowError();
   });
@@ -49,6 +51,32 @@ describe('站点设置', () => {
     expect(coerced.cardSize).toBe(DEFAULT_SETTINGS.cardSize);
     expect(coerceSettings({ cardSize: '不存在' }).cardSize).toBe(DEFAULT_SETTINGS.cardSize);
     expect(coerceSettings(null)).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it('旧版严格设置和 v1 备份缺少新裁切字段时使用居中默认值', () => {
+    const {
+      wallpaperMode: _wallpaperMode,
+      wallpaperDesktopX: _desktopX,
+      wallpaperDesktopY: _desktopY,
+      wallpaperDesktopZoom: _desktopZoom,
+      wallpaperMobileX: _mobileX,
+      wallpaperMobileY: _mobileY,
+      wallpaperMobileZoom: _mobileZoom,
+      ...legacySettings
+    } = DEFAULT_SETTINGS;
+    expect(parseSettings(legacySettings)).toMatchObject({
+      wallpaperMode: 'url',
+      wallpaperDesktopX: 50,
+      wallpaperDesktopY: 50,
+      wallpaperDesktopZoom: 1,
+      wallpaperMobileX: 50,
+      wallpaperMobileY: 50,
+      wallpaperMobileZoom: 1,
+    });
+    expect(parseBackup(makeBackup({ settings: legacySettings as BackupFile['settings'] })).settings).toMatchObject({
+      wallpaperDesktopX: 50,
+      wallpaperMobileZoom: 1,
+    });
   });
 });
 
@@ -101,5 +129,13 @@ describe('备份文件校验', () => {
     expect(() => parseBackup(makeBackup({ version: 2 as 1 }))).toThrow();
     const link = (makeBackup() as BackupFile).links[0]!;
     expect(() => parseBackup(makeBackup({ links: [{ ...link, url: 'javascript:alert(1)' }] }))).toThrow();
+  });
+
+  it('接受可选壁纸图片并检查 MIME、Base64 和 1 MB 限制', () => {
+    const image = { mimeType: 'image/webp', dataBase64: 'AQID' };
+    expect(parseBackup(makeBackup({ wallpaperImage: image })).wallpaperImage).toEqual(image);
+    expect(() => parseBackup(makeBackup({ wallpaperImage: { ...image, mimeType: 'text/plain' } }))).toThrow();
+    expect(() => parseBackup(makeBackup({ wallpaperImage: { ...image, dataBase64: '%%%=' } }))).toThrow();
+    expect(() => parseBackup(makeBackup({ wallpaperImage: { ...image, dataBase64: 'A'.repeat(1_333_340) } }))).toThrow(/1 MB/);
   });
 });

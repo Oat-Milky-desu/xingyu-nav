@@ -17,10 +17,18 @@ const emit = defineEmits<{
 }>();
 
 const MODES: { value: IconType; label: string; hint: string }[] = [
-  { value: 'auto', label: '自动', hint: '使用名称首字母生成占位图标' },
+  {
+    value: 'auto',
+    label: '自动',
+    hint: '为公开网站自动获取并保存图标，之后直接读取。预览仅供参考，保存后可刷新图标。',
+  },
   { value: 'builtin', label: '内置图标', hint: '从内置图标库中选择' },
   { value: 'image', label: '图片地址', hint: '填写 http(s) 图片地址' },
-  { value: 'favicon', label: '网站图标', hint: '读取该站点自己的 /favicon.ico' },
+  {
+    value: 'favicon',
+    label: '网站图标',
+    hint: '留空时自动获取并保存公开网站图标；填写地址则直接加载该图片。',
+  },
 ];
 
 const activeMode = computed(() => MODES.find((mode) => mode.value === props.iconType) ?? MODES[0]!);
@@ -95,7 +103,8 @@ function selectMode(mode: IconType): void {
         :placeholder="iconType === 'favicon' ? '留空则自动读取站点 favicon' : 'https://example.com/logo.png'"
         @input="emit('update:iconValue', ($event.target as HTMLInputElement).value)"
       />
-      <span class="field-hint">仅支持 http:// 或 https:// 地址，加载失败时会自动回退为首字母图标。</span>
+      <span v-if="iconType === 'favicon'" class="field-hint">支持 http:// 或 https:// 地址。留空时自动获取并保存公开网站图标；填写地址则直接加载该图片。</span>
+      <span v-else class="field-hint">仅支持 http:// 或 https:// 地址；自定义图标加载失败时显示名称首字母。</span>
     </div>
   </div>
 </template>

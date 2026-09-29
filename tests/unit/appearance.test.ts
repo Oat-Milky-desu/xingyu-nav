@@ -2,6 +2,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import App from '../../src/App.vue';
+import AdminAppearanceSection from '../../src/components/admin/AdminAppearanceSection.vue';
 import { DEFAULT_SETTINGS } from '../../src/shared/settings';
 import { contentState, resetContentState } from '../../src/stores/content';
 import { clearPreview, effectiveSettings, previewState, setPreview } from '../../src/stores/preview';
@@ -67,6 +68,27 @@ it('未保存的草稿只影响预览，不污染已保存设置', async () => {
   clearPreview();
   expect(effectiveSettings.value.siteTitle).toBe('已保存标题');
   expect(previewState.settings).toBeNull();
+});
+
+it('电脑端与手机端的壁纸裁切控件分别更新对应设置', async () => {
+  wrapper = mount(AdminAppearanceSection, {
+    props: {
+      settings: { ...DEFAULT_SETTINGS, wallpaperMode: 'upload' },
+      wallpaperPreviewUrl: 'blob:wallpaper-preview',
+      wallpaperProcessing: false,
+    },
+  });
+
+  await wrapper.get('input[aria-label="电脑端壁纸水平位置"]').setValue('72');
+  await wrapper.get('input[aria-label="手机端壁纸垂直位置"]').setValue('28');
+  await wrapper.get('input[aria-label="手机端壁纸缩放"]').setValue('1.5');
+
+  expect(wrapper.emitted('update')).toEqual([
+    [{ wallpaperDesktopX: 72 }],
+    [{ wallpaperMobileY: 28 }],
+    [{ wallpaperMobileZoom: 1.5 }],
+  ]);
+  expect(wrapper.findAll('.crop-frame img')).toHaveLength(2);
 });
 
 it('服务端状态探测失败时展示可重试错误而不是伪装成未初始化', async () => {

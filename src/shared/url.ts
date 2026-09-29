@@ -64,10 +64,70 @@ export function originOf(url: string): string | null {
   }
 }
 
-/** 站点自带的 favicon 地址，不经过任何第三方代理 */
+const FAVICON_PATHS = [
+  '/favicon.ico',
+  '/favicon.svg',
+  '/favicon.png',
+  '/apple-touch-icon.png',
+  '/favicon-32x32.png',
+  '/favicon-16x16.png',
+] as const;
+
+const NON_PUBLIC_HOST_SUFFIXES = [
+  '.localhost',
+  '.local',
+  '.internal',
+  '.lan',
+  '.home',
+  '.test',
+  '.invalid',
+  '.example',
+  '.onion',
+  '.arpa',
+  '.alt',
+  '.localdomain',
+  '.intranet',
+  '.corp',
+] as const;
+
+function canUsePublicFaviconServices(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  if (!host || host.startsWith('[') || host.length > 253) return false;
+  const labels = host.split('.');
+  if (labels.length < 2 || labels.some((label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) return false;
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) return false;
+  if (host === 'localhost' || NON_PUBLIC_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))) return false;
+  if (['example.com', 'example.net', 'example.org'].some((domain) => host === domain || host.endsWith(`.${domain}`))) return false;
+  return true;
+}
+
+/** 站点优先的 favicon 地址；公共域名还会附加外部图标服务候选项 */
+export function faviconCandidatesFor(url: string): string[] {
+  const normalized = normalizeHttpUrl(url);
+  if (!normalized) return [];
+
+  try {
+    const parsed = new URL(normalized);
+    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || !parsed.hostname) return [];
+    // 使用 origin 丢弃输入中的凭据、页面路径、查询串和 hash。
+    const candidates = FAVICON_PATHS.map((path) => `${parsed.origin}${path}`);
+    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
+    if (canUsePublicFaviconServices(hostname)) {
+      const encodedHostname = encodeURIComponent(hostname);
+      candidates.push(
+        `https://www.google.com/s2/favicons?domain=${encodedHostname}&sz=64`,
+        `https://icons.duckduckgo.com/ip3/${encodedHostname}.ico`,
+      );
+    }
+    return candidates;
+  } catch {
+    return [];
+  }
+}
+
+/** 返回首个站点自带的 favicon 地址 */
 export function faviconUrlFor(url: string): string {
-  const origin = originOf(url);
-  return origin ? `${origin}/favicon.ico` : '';
+  return faviconCandidatesFor(url)[0] ?? '';
 }
 
 const INITIAL_COLORS = [

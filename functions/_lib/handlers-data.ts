@@ -1,12 +1,12 @@
 import { BACKUP_FORMAT, BACKUP_VERSION, backupField } from '../../src/shared/backup';
 import { dedupeKey, randomId } from '../../src/shared/url';
 import { MAX_GROUPS, MAX_LINKS } from '../../src/shared/limits';
-import type { BackupGroup, BackupLink, ImportResult, ImportSkipped } from '../../src/shared/types';
+import type { BackupFile, BackupGroup, BackupLink, ImportResult, ImportSkipped } from '../../src/shared/types';
 import { bool, list, object, optional, parseObject, str } from '../../src/shared/validate';
 import {
   assertRevisionCurrent,
   executeMutation,
-  getContent,
+  getBackupSnapshot,
   nextGroupPosition,
   validationGuard,
 } from './db';
@@ -14,14 +14,14 @@ import { chunkJsonItems, insertGroupsFromJson, insertLinksFromJson } from './bul
 import { IMPORT_BODY_LIMIT, RESTORE_BODY_LIMIT, requireAuth, type Ctx } from './context';
 import { HttpError, jsonResponse, readJson } from './http';
 import { assertLinkIcon, linkShape, revisionField } from './handlers-content';
+import { assertImageMagic, MAX_WALLPAPER_IMAGE_BYTES } from './handlers-wallpaper';
 
 const MAX_IMPORT_GROUPS = MAX_GROUPS;
 const MAX_IMPORT_LINKS = MAX_LINKS;
 
 export async function handleExportBackup(ctx: Ctx): Promise<Response> {
   requireAuth(ctx);
-  // getContent 使用单个 db.batch 读取，保证导出的内容 / 设置 / 版本号来自同一快照
-  const content = await getContent(ctx.env.DB);
+  const { content, wallpaperImage } = await getBackupSnapshot(ctx.env.DB);
   const groups = content.groups.map(({ links: _links, ...group }) => group);
   const links = content.groups.flatMap((group) => group.links);
   return jsonResponse({
@@ -31,6 +31,9 @@ export async function handleExportBackup(ctx: Ctx): Promise<Response> {
     settings: content.settings,
     groups,
     links,
+    ...(wallpaperImage
+      ? { wallpaperImage: { mimeType: wallpaperImage.mime_type, dataBase64: encodeBase64(wallpaperImage.image) } }
+      : {}),
   });
 }
 
@@ -40,10 +43,23 @@ export async function handleRestoreBackup(ctx: Ctx): Promise<Response> {
   const body = await readJson(ctx.request, RESTORE_BODY_LIMIT);
   const input = parseObject({ revision: revisionField, backup: backupField }, body);
   const backup = input.backup;
+  const wallpaperImage = decodeBackupWallpaperImage(backup.wallpaperImage);
 
   // 删除 + 重建 + 设置写入全部处于同一个受版本守卫保护的事务中；
   // 使用 json_each 分块批量写入，查询数量与条目数无关（D1 Free 计划限制 50 条/调用）。
   const statements: D1PreparedStatement[] = [db.prepare('DELETE FROM links'), db.prepare('DELETE FROM groups')];
+  if (wallpaperImage) {
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO wallpaper_image (id, mime_type, image, updated_at) VALUES (1, ?1, ?2, ?3)
+           ON CONFLICT(id) DO UPDATE SET mime_type = excluded.mime_type, image = excluded.image, updated_at = excluded.updated_at`,
+        )
+        .bind(wallpaperImage.mimeType, wallpaperImage.image, ctx.nowIso),
+    );
+  } else {
+    statements.push(db.prepare('DELETE FROM wallpaper_image WHERE id = 1'));
+  }
   for (const chunk of chunkJsonItems(backup.groups)) {
     statements.push(insertGroupsFromJson(db, chunk.json));
   }
@@ -61,6 +77,50 @@ export async function handleRestoreBackup(ctx: Ctx): Promise<Response> {
 
   const revision = await executeMutation(db, input.revision, statements, ctx.nowIso);
   return jsonResponse({ revision, groups: backup.groups.length, links: backup.links.length });
+}
+
+interface DecodedWallpaperImage {
+  mimeType: string;
+  image: Uint8Array;
+}
+
+function decodeBackupWallpaperImage(value: BackupFile['wallpaperImage']): DecodedWallpaperImage | null {
+  if (value === undefined) return null;
+  if (!value || typeof value.mimeType !== 'string' || typeof value.dataBase64 !== 'string') {
+    throw new HttpError(400, 'validation_error', '备份中的壁纸数据无效');
+  }
+  const maxEncodedLength = Math.ceil(MAX_WALLPAPER_IMAGE_BYTES / 3) * 4;
+  if (value.dataBase64.length > maxEncodedLength) throw new HttpError(413, 'payload_too_large', '备份中的壁纸图片不能超过 1,000,000 字节');
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.dataBase64)) {
+    throw new HttpError(400, 'validation_error', '备份中的壁纸编码无效');
+  }
+
+  let binary: string;
+  try {
+    binary = atob(value.dataBase64);
+  } catch {
+    throw new HttpError(400, 'validation_error', '备份中的壁纸编码无效');
+  }
+  if (btoa(binary) !== value.dataBase64) throw new HttpError(400, 'validation_error', '备份中的壁纸编码无效');
+  if (binary.length === 0) throw new HttpError(400, 'validation_error', '备份中的壁纸图片不能为空');
+  if (binary.length > MAX_WALLPAPER_IMAGE_BYTES) throw new HttpError(413, 'payload_too_large', '备份中的壁纸图片不能超过 1,000,000 字节');
+
+  const image = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) image[index] = binary.charCodeAt(index);
+  assertImageMagic(value.mimeType, image);
+  return { mimeType: value.mimeType, image };
+}
+
+function encodeBase64(value: ArrayBuffer | Uint8Array): string {
+  const bytes = ArrayBuffer.isView(value)
+    ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+    : new Uint8Array(value as ArrayBuffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
 }
 
 const importLinkShape = {

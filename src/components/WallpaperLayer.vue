@@ -1,18 +1,54 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import { effectiveSettings } from '../stores/preview';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { effectiveSettings, previewState } from '../stores/preview';
+import { contentState } from '../stores/content';
+import WallpaperCropImage from './WallpaperCropImage.vue';
 import { isHttpUrl } from '../shared/url';
 
 const imageUrl = computed(() => {
+  if (effectiveSettings.value.wallpaperMode === 'upload') {
+    if (previewState.wallpaperUrl) return previewState.wallpaperUrl;
+    return `/api/wallpaper?v=${contentState.revision}`;
+  }
   const url = effectiveSettings.value.wallpaperUrl.trim();
   return url && isHttpUrl(url) ? url : '';
 });
+const mobileViewport = ref(false);
+let breakpoint: MediaQueryList | null = null;
+
+function updateViewport(): void {
+  mobileViewport.value = breakpoint?.matches ?? window.innerWidth <= 640;
+}
+
+onMounted(() => {
+  if (typeof window.matchMedia === 'function') {
+    breakpoint = window.matchMedia('(max-width: 640px)');
+    updateViewport();
+    breakpoint.addEventListener('change', updateViewport);
+  } else {
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+  }
+});
+
+onBeforeUnmount(() => {
+  breakpoint?.removeEventListener('change', updateViewport);
+  window.removeEventListener('resize', updateViewport);
+});
+
 </script>
 
 <template>
   <div class="wallpaper" aria-hidden="true">
     <div class="wallpaper-glow"></div>
-    <div v-if="imageUrl" class="wallpaper-image" :style="{ backgroundImage: `url(${imageUrl})` }"></div>
+    <div v-if="imageUrl" class="wallpaper-image">
+      <WallpaperCropImage
+        :src="imageUrl"
+        :x="mobileViewport ? effectiveSettings.wallpaperMobileX : effectiveSettings.wallpaperDesktopX"
+        :y="mobileViewport ? effectiveSettings.wallpaperMobileY : effectiveSettings.wallpaperDesktopY"
+        :zoom="mobileViewport ? effectiveSettings.wallpaperMobileZoom : effectiveSettings.wallpaperDesktopZoom"
+      />
+    </div>
     <div class="wallpaper-overlay"></div>
   </div>
 </template>
@@ -39,9 +75,7 @@ const imageUrl = computed(() => {
 .wallpaper-image {
   position: absolute;
   inset: 0;
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
+  overflow: hidden;
 }
 
 .wallpaper-overlay {

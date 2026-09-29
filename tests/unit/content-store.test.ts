@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { contentState, loadContent, moveGroupTo, moveLink, moveLinkByOffset, resetContentState } from '../../src/stores/content';
+import { contentState, loadContent, moveGroupTo, moveLink, moveLinkByOffset, resetContentState, saveWallpaper } from '../../src/stores/content';
 import { DEFAULT_SETTINGS } from '../../src/shared/settings';
 import type { ContentPayload, NavGroup } from '../../src/shared/types';
 
@@ -49,10 +49,12 @@ function orderOf(groupId: string): string[] {
 
 describe('排序状态逻辑', () => {
   let orderRequests: unknown[];
+  let wallpaperForm: FormData | null;
 
   beforeEach(async () => {
     resetContentState();
     orderRequests = [];
+    wallpaperForm = null;
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -64,6 +66,11 @@ describe('排序状态逻辑', () => {
         if (url === '/api/order' && method === 'PUT') {
           orderRequests.push(JSON.parse(String(init?.body)));
           return new Response(JSON.stringify({ revision: 2 }), { status: 200 });
+        }
+        if (url === '/api/wallpaper' && method === 'PUT') {
+          wallpaperForm = init?.body as FormData;
+          const settings = JSON.parse(String(wallpaperForm.get('settings'))) as ContentPayload['settings'];
+          return new Response(JSON.stringify({ revision: 2, settings }), { status: 200 });
         }
         return new Response(JSON.stringify({ error: { code: 'not_found', message: '未预期请求' } }), { status: 404 });
       }),
@@ -145,5 +152,17 @@ describe('排序状态逻辑', () => {
     await moveGroupTo('g_b', 1);
     expect(orderRequests).toHaveLength(0);
     expect(contentState.groups.map((group) => group.id)).toEqual(['g_a', 'g_b']);
+  });
+
+  it('以 revision、完整设置和图片组成 multipart 壁纸保存请求', async () => {
+    const file = new File(['image bytes'], 'wallpaper.webp', { type: 'image/webp' });
+    const settings = { ...DEFAULT_SETTINGS, wallpaperMode: 'upload' as const, wallpaperMobileX: 68 };
+    await saveWallpaper(file, settings, contentState.revision);
+
+    expect(wallpaperForm?.get('revision')).toBe('1');
+    expect(JSON.parse(String(wallpaperForm?.get('settings')))).toEqual(settings);
+    expect((wallpaperForm?.get('image') as File).name).toBe('wallpaper.webp');
+    expect(contentState.revision).toBe(2);
+    expect(contentState.settings.wallpaperMobileX).toBe(68);
   });
 });

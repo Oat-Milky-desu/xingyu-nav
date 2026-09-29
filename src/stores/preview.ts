@@ -9,8 +9,9 @@ import { contentState } from './content';
  * - 页面渲染统一读取 effectiveSettings，取消 / 离开管理页时清除预览，
  *   因此未保存的修改绝不会污染全局状态或在其它页面显示。
  */
-export const previewState = reactive<{ settings: AppSettings | null }>({
+export const previewState = reactive<{ settings: AppSettings | null; wallpaperUrl: string | null }>({
   settings: null,
+  wallpaperUrl: null,
 });
 
 export const effectiveSettings = computed<AppSettings>(() => previewState.settings ?? contentState.settings);
@@ -21,4 +22,9 @@ export function setPreview(settings: AppSettings): void {
 
 export function clearPreview(): void {
   previewState.settings = null;
+  previewState.wallpaperUrl = null;
+}
+
+export function setWallpaperPreview(url: string | null): void {
+  previewState.wallpaperUrl = url;
 }

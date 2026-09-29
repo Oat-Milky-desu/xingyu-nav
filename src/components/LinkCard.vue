@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { supportsSavedIconCache } from '../api/icon-cache';
 import { hostOf } from '../shared/url';
 import type { NavLink } from '../shared/types';
 import IconView from './IconView.vue';
@@ -22,8 +23,15 @@ const emit = defineEmits<{
 }>();
 
 const dropSide = ref<'before' | 'after' | null>(null);
+const iconRefreshBusy = ref(false);
+const iconView = ref<{ refreshSavedIcon: () => Promise<void> } | null>(null);
 const host = computed(() => hostOf(props.link.url));
 const description = computed(() => props.link.description || host.value);
+const canRefreshIcon = computed(() => supportsSavedIconCache(props.link.url, props.link.iconType, props.link.iconValue));
+
+function refreshIcon(): void {
+  void iconView.value?.refreshSavedIcon();
+}
 
 function onDragOver(event: DragEvent): void {
   if (!props.editing) return;
@@ -69,7 +77,15 @@ function onDragLeave(): void {
       :rel="link.target === '_blank' ? 'noopener noreferrer' : undefined"
       :title="link.description || link.url"
     >
-      <IconView :name="link.name" :url="link.url" :icon-type="link.iconType" :icon-value="link.iconValue" />
+      <IconView
+        ref="iconView"
+        :name="link.name"
+        :url="link.url"
+        :icon-type="link.iconType"
+        :icon-value="link.iconValue"
+        :link-id="link.id"
+        @refresh-state="iconRefreshBusy = $event"
+      />
       <span class="link-text">
         <span class="link-name">{{ link.name }}</span>
         <span class="link-desc">{{ description }}</span>
@@ -78,7 +94,15 @@ function onDragLeave(): void {
 
     <div v-else class="link-main">
       <span class="drag-handle" aria-hidden="true">⠿</span>
-      <IconView :name="link.name" :url="link.url" :icon-type="link.iconType" :icon-value="link.iconValue" />
+      <IconView
+        ref="iconView"
+        :name="link.name"
+        :url="link.url"
+        :icon-type="link.iconType"
+        :icon-value="link.iconValue"
+        :link-id="link.id"
+        @refresh-state="iconRefreshBusy = $event"
+      />
       <span class="link-text">
         <span class="link-name">{{ link.name }}</span>
         <span class="link-desc">{{ description }}</span>
@@ -109,6 +133,17 @@ function onDragLeave(): void {
       >
         ↗
       </a>
+      <button
+        v-if="canRefreshIcon"
+        type="button"
+        class="btn btn-sm"
+        :disabled="iconRefreshBusy"
+        :aria-label="`刷新「${link.name}」的图标`"
+        :title="iconRefreshBusy ? '正在刷新图标' : '刷新图标'"
+        @click="refreshIcon"
+      >
+        {{ iconRefreshBusy ? '刷新中…' : '刷新图标' }}
+      </button>
       <button type="button" class="btn btn-ghost btn-icon" :aria-label="`编辑「${link.name}」`" title="编辑" @click="emit('edit')">
         ✎
       </button>

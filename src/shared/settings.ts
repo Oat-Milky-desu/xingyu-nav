@@ -1,4 +1,4 @@
-import type { AppSettings, CardSize, SearchEngine, Theme } from './types';
+import type { AppSettings, CardSize, SearchEngine, Theme, WallpaperMode } from './types';
 import { bool, num, object, oneOf, parseObject, str, httpUrl, type Field } from './validate';
 import { CARD_SIZE_VALUES, SEARCH_ENGINE_VALUES, THEME_VALUES } from './search-engines';
 
@@ -6,6 +6,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   siteTitle: '星屿导航',
   siteSubtitle: '我的私人导航站',
   wallpaperUrl: '',
+  wallpaperMode: 'url',
+  wallpaperDesktopX: 50,
+  wallpaperDesktopY: 50,
+  wallpaperDesktopZoom: 1,
+  wallpaperMobileX: 50,
+  wallpaperMobileY: 50,
+  wallpaperMobileZoom: 1,
   overlayOpacity: 0.45,
   cardOpacity: 0.6,
   cardSize: 'cozy',
@@ -19,6 +26,14 @@ const settingsShape = {
   siteTitle: str({ min: 1, max: 40, label: '站点标题' }),
   siteSubtitle: str({ min: 0, max: 80, label: '站点副标题' }),
   wallpaperUrl: httpUrl({ allowEmpty: true, label: '壁纸地址' }),
+  // Defaults keep stored settings and v1 backups created before responsive crops readable.
+  wallpaperMode: oneOf<WallpaperMode>(['url', 'upload'], '壁纸来源').withDefault('url'),
+  wallpaperDesktopX: num({ min: 0, max: 100, label: '桌面壁纸水平位置' }).withDefault(50),
+  wallpaperDesktopY: num({ min: 0, max: 100, label: '桌面壁纸垂直位置' }).withDefault(50),
+  wallpaperDesktopZoom: num({ min: 1, max: 3, label: '桌面壁纸缩放' }).withDefault(1),
+  wallpaperMobileX: num({ min: 0, max: 100, label: '手机壁纸水平位置' }).withDefault(50),
+  wallpaperMobileY: num({ min: 0, max: 100, label: '手机壁纸垂直位置' }).withDefault(50),
+  wallpaperMobileZoom: num({ min: 1, max: 3, label: '手机壁纸缩放' }).withDefault(1),
   overlayOpacity: num({ min: 0, max: 0.9, label: '遮罩不透明度' }),
   cardOpacity: num({ min: 0.05, max: 1, label: '卡片不透明度' }),
   cardSize: oneOf<CardSize>(CARD_SIZE_VALUES, '卡片尺寸'),

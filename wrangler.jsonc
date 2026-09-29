@@ -21,7 +21,7 @@
     {
       "binding": "DB",
       "database_name": "xingyu-nav",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "c2f466f1-a63d-48e8-9782-be292bb9ba6c",
       "migrations_dir": "migrations"
     }
   ]
