@@ -14,6 +14,11 @@ export interface Env {
    * 仅在显式配置时生效，生产环境不需要配置。
    */
   DEV_ORIGIN?: string;
+  /**
+   * 用量监控凭据（Cloudflare API Token / DeepSeek API Key）的加密密钥，
+   * 至少 16 位随机字符串。未配置时无法保存监控凭据；已保存凭据不会被明文回传。
+   */
+  USAGE_ENCRYPTION_KEY?: string;
 }
 
 declare global {
@@ -24,6 +29,7 @@ declare global {
       INIT_SECRET?: string;
       FORCE_SECURE_COOKIE?: string;
       DEV_ORIGIN?: string;
+      USAGE_ENCRYPTION_KEY?: string;
     }
   }
 }

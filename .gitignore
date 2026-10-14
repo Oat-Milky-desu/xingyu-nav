@@ -20,6 +20,7 @@ Thumbs.db
 
 # 编排工具的日志与运行时状态（不参与构建与版本控制）
 .codex-pi/
+.openchamber/
 
 # 日志
 *.log

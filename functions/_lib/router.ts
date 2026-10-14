@@ -27,6 +27,12 @@ import {
 } from './handlers-content';
 import { handleExportBackup, handleImport, handleRestoreBackup } from './handlers-data';
 import { handleGetLinkIcon, handlePostLinkIcon } from './handlers-icons';
+import {
+  handleDeleteUsageProvider,
+  handleGetUsage,
+  handlePutUsageProvider,
+  handleRefreshUsage,
+} from './handlers-usage';
 import { handleGetWallpaper, handlePutWallpaper } from './handlers-wallpaper';
 
 interface RouteDefinition {
@@ -62,6 +68,10 @@ export const ROUTES: RouteDefinition[] = [
   { method: 'GET', pattern: 'backup', auth: true, handler: handleExportBackup },
   { method: 'POST', pattern: 'restore', auth: true, handler: handleRestoreBackup },
   { method: 'POST', pattern: 'import', auth: true, handler: handleImport },
+  { method: 'GET', pattern: 'usage', auth: true, handler: handleGetUsage },
+  { method: 'POST', pattern: 'usage/refresh', auth: true, handler: handleRefreshUsage },
+  { method: 'PUT', pattern: 'usage/providers/:provider', auth: true, handler: handlePutUsageProvider },
+  { method: 'DELETE', pattern: 'usage/providers/:provider', auth: true, handler: handleDeleteUsageProvider },
 ];
 
 function segmentsOf(pathname: string): string[] {

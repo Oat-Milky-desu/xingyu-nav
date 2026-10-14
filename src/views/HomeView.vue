@@ -10,6 +10,7 @@ import GroupSection from '../components/GroupSection.vue';
 import LinkCard from '../components/LinkCard.vue';
 import LinkFormDialog from '../components/LinkFormDialog.vue';
 import SearchBar from '../components/SearchBar.vue';
+import UsageDrawer from '../components/usage/UsageDrawer.vue';
 import type { IconType, LinkTarget, NavGroup, NavLink, Theme } from '../shared/types';
 import {
   contentState,
@@ -37,6 +38,7 @@ const router = useRouter();
 const editing = ref(false);
 const query = ref('');
 const resultsRef = ref<HTMLElement | null>(null);
+const usageOpen = ref(false);
 
 const linkDialog = ref({ open: false, groupId: '', link: null as NavLink | null });
 const linkSaving = ref(false);
@@ -298,6 +300,16 @@ async function toggleTheme(): Promise<void> {
           <span>{{ themeSaving ? '保存中…' : themeToggleLabel }}</span>
         </button>
         <span class="badge user-chip">{{ sessionState.username || '管理员' }}</span>
+        <button
+          type="button"
+          class="btn btn-sm"
+          :aria-expanded="usageOpen"
+          aria-haspopup="dialog"
+          title="查看用量监控"
+          @click="usageOpen = true"
+        >
+          用量
+        </button>
         <button type="button" class="btn btn-sm" :aria-pressed="editing" @click="toggleEditing">
           {{ editing ? '完成编辑' : '编辑模式' }}
         </button>
@@ -421,6 +433,8 @@ async function toggleTheme(): Promise<void> {
       @close="deleteDialog.open = false"
       @submit="submitDeleteGroup"
     />
+
+    <UsageDrawer :open="usageOpen" @close="usageOpen = false" />
   </div>
 </template>
 

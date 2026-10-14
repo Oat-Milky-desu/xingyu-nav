@@ -14,6 +14,13 @@
 # 这里刻意留空：仓库不提供任何可用的默认值，未配置时服务端会拒绝初始化。
 INIT_SECRET=
 
+# 用量监控凭据的加密密钥（可选）：配置后可在界面保存 Cloudflare / DeepSeek 的
+# API 凭据并查看用量。至少 16 位随机字符串，例如：
+#   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+# 未配置时用量监控面板会提示无法保存凭据；更换该密钥会使已保存的凭据无法解密，
+# 需要重新保存一次配置。请与 INIT_SECRET 分开保存，且不要提交到版本库。
+USAGE_ENCRYPTION_KEY=
+
 # 可选：强制会话 Cookie 带上 Secure（默认在 https 下自动启用；本地 http 调试无需设置）
 # FORCE_SECURE_COOKIE="false"
 

@@ -18,6 +18,7 @@ export default defineConfig({
           d1Databases: ['DB'],
           bindings: {
             INIT_SECRET: 'test-init-secret',
+            USAGE_ENCRYPTION_KEY: 'test-usage-encryption-key-0123456789abcdef',
             TEST_MIGRATIONS: migrations,
           },
         },

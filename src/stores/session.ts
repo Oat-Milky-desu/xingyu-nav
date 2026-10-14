@@ -3,6 +3,7 @@ import { ApiError, apiRequest, bumpSessionEpoch, errorText, getSessionEpoch, set
 import type { PasswordChangeResponse, StatusResponse } from '../shared/types';
 import { contentState, loadContent, resetContentState } from './content';
 import { clearPreview } from './preview';
+import { resetUsageState } from './usage';
 import { showToast } from './ui';
 
 export const sessionState = reactive({
@@ -23,6 +24,7 @@ function clearPrivateState(): void {
   setCsrfToken(null);
   clearPreview();
   resetContentState();
+  resetUsageState();
   bumpSessionEpoch();
 }
 

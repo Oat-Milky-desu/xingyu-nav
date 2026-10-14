@@ -194,6 +194,8 @@ export async function resetDatabase(): Promise<void> {
     env.DB.prepare('DELETE FROM admin_users'),
     env.DB.prepare('DELETE FROM settings'),
     env.DB.prepare('DELETE FROM wallpaper_image'),
+    env.DB.prepare('DELETE FROM usage_cache'),
+    env.DB.prepare('DELETE FROM usage_providers'),
     env.DB.prepare("INSERT INTO settings (id, settings_json, updated_at) VALUES (1, '{}', '2026-03-01T00:00:00.000Z')"),
     env.DB.prepare("UPDATE app_meta SET revision = 0, updated_at = '2026-03-01T00:00:00.000Z' WHERE id = 1"),
   ]);

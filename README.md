@@ -10,6 +10,7 @@
 - 链接：新增 / 编辑 / 删除，支持名称、地址、描述、分组、图标、打开方式；支持拖拽排序与跨分组移动，并提供键盘可用的按钮替代方案
 - 分组：增删改、拖拽排序（编辑模式下拖动分组标题前的 ⠿ 手柄）以及上移/下移按钮；删除非空分组时必须显式选择「迁移到其它分组」或勾选确认「级联删除」
 - 设置页 `/admin`：站点标题/副标题、壁纸网址或本地图片上传、电脑与手机分别调整壁纸取景、遮罩与卡片不透明度、卡片尺寸、毛玻璃强度、主题、默认搜索引擎、时钟秒数、修改密码
+- 用量监控：首页右上角「用量」按钮打开右侧面板，按卡片展示已配置服务的用量（目前支持 Cloudflare Workers 请求/错误统计与 DeepSeek 账户余额）；每张卡片右上角的齿轮用于添加 / 修改 / 删除凭据，未配置的服务不会显示卡片。凭据在服务端以 AES-GCM 加密保存，**不进入 `/api/content`，也不进入 JSON 备份**
 - 数据：JSON 备份导出、校验预览 + 显式确认的原子恢复；浏览器书签 HTML 导入（本地解析、预览、按规范化 URL 去重）
 - 安全：PBKDF2-SHA256 加盐口令、服务端仅存会话令牌哈希、七天滑动过期的 Cookie 会话、同源 + CSRF 校验、登录/初始化限流、严格输入校验、API 响应禁止缓存
 
@@ -30,13 +31,13 @@ Cloudflare D1 (SQLite)                   →  migrations/*.sql
 | 目录 | 说明 |
 | --- | --- |
 | `src/` | 前端源码（视图、组件、状态仓库、共享校验与类型） |
-| `src/shared/` | 前后端共享的纯 TS 模块：类型、校验、设置、备份格式、图标库、URL 工具、容量上限 |
+| `src/shared/` | 前后端共享的纯 TS 模块：类型、校验、设置、备份格式、图标库、URL 工具、容量上限、用量监控契约 |
 | `worker/index.ts` | Workers 入口：精确匹配 `/api` 与 `/api/*` 并交给共享路由，其余请求原样委派给静态资源绑定 `ASSETS` |
 | `functions/api/[[path]].ts` | Pages Functions 入口：与 Worker 共用同一份路由，`/api/*` 全部由它分发 |
-| `functions/_lib/` | 服务端模块：路由、HTTP 工具、会话与限流、加密、D1 访问层、批量写入、各类 handler |
-| `migrations/` | D1 迁移 SQL（`0001_init.sql` 至 `0006_icon_cache.sql`） |
+| `functions/_lib/` | 服务端模块：路由、HTTP 工具、会话与限流、加密、D1 访问层、批量写入、用量监控（凭据加密与上游适配器）、各类 handler |
+| `migrations/` | D1 迁移 SQL（`0001_init.sql` 至 `0007_usage_monitor.sql`） |
 | `tests/api/` | 在 workerd 中运行的集成测试（真实 Miniflare D1） |
-| `tests/unit/` | jsdom 环境下的前端单元测试（书签解析、校验、URL、备份格式、会话状态、外观变量） |
+| `tests/unit/` | jsdom 环境下的前端单元测试（书签解析、校验、URL、备份格式、会话状态、外观变量、用量面板） |
 | `dist/` | `npm run build` 产物（已被 gitignore） |
 | `wrangler.jsonc` | Workers 配置（根目录）：`main`、静态资源与 SPA 回退、`/api` 优先路由、D1 绑定、compatibility date；Deploy to Cloudflare 按钮读取此文件 |
 | `wrangler.pages.jsonc` | Pages 配置：`pages_build_output_dir`、D1 绑定；供 Pages Git 集成与 Pages 项目配置参考 |
@@ -50,6 +51,7 @@ Cloudflare D1 (SQLite)                   →  migrations/*.sql
 - `groups` / `links`：导航内容，`links.group_id` 外键级联
 - `settings`：站点设置的 JSON 单行存储
 - `wallpaper_image`：当前上传的壁纸图片（单张，最多 1 MB）；与设置一起通过版本检查原子更新
+- `usage_providers` / `usage_cache`：用量监控的凭据与取数缓存。凭据以 AES-GCM 密文保存，`generation` 在每次更换凭据时 +1，缓存代际不一致即被视为失效；这两张表**不参与内容版本号，也不进入 JSON 备份**
 - `revision_guard` / `existence_guard` / `validation_guard` / `content_budget_guard`：并发守卫表。任何插入都会违反已命名的 `CHECK` 约束，因此当版本号不匹配、目标行不存在、业务上限被突破或内容总量超预算时，整个 `db.batch()` 事务回滚，分别返回 409 / 404 / 400 / 400，绝不发生部分写入
 
 ### 规模化写入
@@ -71,7 +73,8 @@ npm install
 
 # 2) 准备本地环境变量
 cp .dev.vars.example .dev.vars      # Windows: copy .dev.vars.example .dev.vars
-#   编辑 .dev.vars，把 INIT_SECRET 改成一段随机字符串（至少 16 位）
+#   编辑 .dev.vars：把 INIT_SECRET 改成一段随机字符串（至少 16 位）；
+#   如需使用「用量监控」面板，再给 USAGE_ENCRYPTION_KEY 填一段至少 16 位的随机字符串
 
 # 3) 初始化本地 D1 并应用迁移（数据保存在 .wrangler/state，已被忽略）
 npm run db:migrate:local
@@ -104,6 +107,18 @@ Pages 与 Workers 两种本地预览都读取根目录 `wrangler.jsonc` 的 D1 �
 
 登录后进入「设置」→「外观样式」→「壁纸」，可选择网络图片或上传 JPEG、PNG、WebP。上传后分别在电脑端和手机端预览中调整水平位置、垂直位置与缩放，再点「保存设置」。裁切参数和上传图片会一起保存；重新打开或在另一台设备登录时仍会生效。JSON 备份也包含上传的壁纸。
 
+### 用量监控（可选）
+
+首页右上角的「用量」按钮会从右侧打开监控面板。面板只展示**已配置**的服务，每张卡片右上角的齿轮用于添加 / 修改 / 删除凭据。
+
+- **Cloudflare Workers**：需要 `Account ID`、一个具备 **Account Analytics: Read** 权限的 API Token，以及你所在套餐（用于展示免费额度进度）。可选填单个 Worker 名称，只统计该 Worker；留空则统计整个账号。
+  - 展示 UTC 今日 / 本月的请求数与错误数、错误率，以及免费套餐的当日额度进度。统计存在采样与聚合延迟，最后几分钟的数据可能尚未计入；只统计单个 Worker 时，请求数不代表整个账号的额度消耗。
+  - 数据来自 [GraphQL Analytics API](https://developers.cloudflare.com/analytics/graphql-api/tutorials/querying-workers-metrics/) 的 `workersInvocationsAdaptive` 数据集（官方标注为 beta），无法给出精确账单金额。
+- **DeepSeek**：需要一个 API Key（只调用余额接口 `GET /user/balance`，不会发起任何对话请求）。
+  - 展示账户可用余额、充值余额、赠送余额与币种。官方**没有**账号级用量接口，因此不展示累计 Token 消耗或消费曲线。
+
+凭据保存前会先向上游校验一次（可在弹窗里取消勾选）；取数结果由服务端缓存，默认 5 分钟内复用，可在面板中手动刷新（有 10 秒冷却）。取数失败时会保留上一次成功的数据，并在卡片上标注失败原因与数据时间。
+
 ---
 
 ## 3. 部署
@@ -125,11 +140,12 @@ Pages 与 Workers 两种本地预览都读取根目录 `wrangler.jsonc` 的 D1 �
 点击顶部按钮后，Cloudflare 会：
 
 1. 读取根目录 `wrangler.jsonc`，自动创建 D1 数据库并绑定为 `DB`，同时把真实 `database_id` 写回克隆仓库的配置（仓库里的占位 UUID 无需手动替换）。
-2. 从 `.dev.vars.example` 识别需要填写的密钥：`INIT_SECRET`。请填入一段 **至少 16 位** 的随机字符串（例如 `openssl rand -hex 32` 的输出）。部署配置页同时会显示 `package.json` → `cloudflare.bindings` 中为 `DB` / `INIT_SECRET` 提供的说明。
+2. 从 `.dev.vars.example` 识别需要填写的密钥：`INIT_SECRET` 与（可选）`USAGE_ENCRYPTION_KEY`。`INIT_SECRET` 请填入一段 **至少 16 位** 的随机字符串（例如 `openssl rand -hex 32` 的输出）；不打算使用用量监控时可以留空 `USAGE_ENCRYPTION_KEY`。部署配置页同时会显示 `package.json` → `cloudflare.bindings` 中为 `DB` / `INIT_SECRET` / `USAGE_ENCRYPTION_KEY` 提供的说明。
 3. 用 `npm run build` 构建前端，用 `npm run deploy` 部署：先执行远端 D1 迁移（`wrangler d1 migrations apply DB --remote`），再执行 `wrangler deploy`。迁移命令引用的是**绑定名** `DB`，因此即使数据库被起了别的名字也能正确执行。
 4. 部署完成后访问站点，会自动跳转 `/setup`，填写 `INIT_SECRET`、管理员用户名与密码完成首次初始化。
 
 `INIT_SECRET` 只在 `/api/setup` 首次初始化时参与校验，绝不会进入前端构建产物，也不会以 `VITE_` 前缀暴露。
+`USAGE_ENCRYPTION_KEY` 只用于加密 / 解密监控凭据，同样不会进入前端产物；**更换该密钥会使已保存的凭据无法解密**，届时在面板中重新保存一次即可（不影响导航内容与备份）。
 
 ### 3.2 手动部署到 Cloudflare Workers
 
@@ -144,11 +160,14 @@ npm run db:migrate:remote      # = wrangler d1 migrations apply DB --remote
 npx wrangler secret put INIT_SECRET
 # 生成随机密钥示例：node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
+# 3b) 可选：配置用量监控凭据的加密密钥（不配置则无法在界面保存监控凭据）
+npx wrangler secret put USAGE_ENCRYPTION_KEY
+
 # 4) 构建 + 远端迁移 + 部署
 npm run deploy                 # = npm run build && npm run db:migrate:remote && wrangler deploy
 ```
 
-也可以在 Cloudflare Dashboard → Workers & Pages → 你的 Worker → Settings → Variables and Secrets 中添加 `INIT_SECRET`（类型选择 **Secret / 加密**）。
+也可以在 Cloudflare Dashboard → Workers & Pages → 你的 Worker → Settings → Variables and Secrets 中添加 `INIT_SECRET` 与 `USAGE_ENCRYPTION_KEY`（类型选择 **Secret / 加密**）。
 
 ### 3.3 保留：Cloudflare Pages 手动部署
 
@@ -176,6 +195,8 @@ npm run db:migrate:remote      # = wrangler d1 migrations apply DB --remote
 
 # 4) 配置初始化密钥（加密变量）
 npx wrangler pages secret put INIT_SECRET --project-name <你的 Pages 项目名>
+#    可选：用量监控凭据的加密密钥
+npx wrangler pages secret put USAGE_ENCRYPTION_KEY --project-name <你的 Pages 项目名>
 #    也可在 Dashboard → Settings → Variables and Secrets 添加，类型选择 Secret
 ```
 
@@ -184,7 +205,7 @@ npx wrangler pages secret put INIT_SECRET --project-name <你的 Pages 项目名
 - Build command：`npm run build`
 - Build output directory：`dist`
 - Pages 会自动发现并打包 `functions/` 目录
-- D1 绑定与 `INIT_SECRET` 按上面的前置步骤在 Dashboard 配置
+- D1 绑定与 `INIT_SECRET` / `USAGE_ENCRYPTION_KEY` 按上面的前置步骤在 Dashboard 配置
 
 这是最简单的 Pages 方式：各绑定的唯一来源是 Dashboard，仓库中的 `wrangler.pages.jsonc` 仅作参考/模板，不参与部署。
 
@@ -261,8 +282,9 @@ Pbkdf2 failed: iteration counts above 100000 are not supported
 | 限流 | 登录失败按 IP（20 次 / 15 分钟）与用户名（5 次 / 15 分钟）；初始化尝试按 IP（10 次 / 15 分钟）；改密失败按用户名（10 次 / 15 分钟）。每次尝试在密码校验**之前**用单条条件 INSERT 原子占位，并发请求无法一起越过阈值；成功后只清理本次占位及更早的失败记录，不误删并发失败 |
 | 输入校验 | 服务端对每个请求体做严格模式校验：拒绝未知字段、限制长度与数量、URL 仅允许 `http(s)`、图标引用必须存在、请求体大小流式限制（普通接口 1 MB / 书签导入与备份恢复 20 MB） |
 | 并发 | 所有内容写入都在同一个 `db.batch()` 事务里先执行版本守卫，再写入，最后 `revision + 1`；版本不匹配即整体回滚并返回 409。内容读取与备份导出使用单次批量读取获得一致快照。客户端收到 409 会刷新最新数据并提示重试 |
-| 隐私 | 除 `/api/status`（只回答「是否需要初始化」与当前登录态）外，所有接口都需要登录；API 响应统一 `Cache-Control: no-store` 与 `Vary: Cookie`；静态产物中不含任何密钥或口令；登出 / 会话过期会立即清空前端的标题、壁纸与分组，在途响应按会话代际丢弃，不会回流 |
-| 其他 | 页面不渲染任何导入的 HTML（书签解析只取文本，内置 SVG 图标仅来自常量表）；壁纸上传仅接受经格式和大小校验的图片，不提供 R2、任意文件上传或服务端外部图片代理 |
+| 隐私 | 除 `/api/status`（只回答「是否需要初始化」与当前登录态）外，所有接口都需要登录；API 响应统一 `Cache-Control: no-store` 与 `Vary: Cookie`；静态产物中不含任何密钥或口令；登出 / 会话过期会立即清空前端的标题、壁纸、分组与用量数据，在途响应按会话代际丢弃，不会回流 |
+| 监控凭据 | Cloudflare API Token / DeepSeek API Key 使用 `USAGE_ENCRYPTION_KEY` 通过 AES-GCM 加密后存入 `usage_providers`，仅在服务端解密用于访问上游；密文与明文**都不会**回传前端，也不进入 `/api/content` 或 JSON 备份。未配置密钥时保存接口直接返回 `server_misconfigured`（失败关闭，绝不退化为明文） |
+| 其他 | 页面不渲染任何导入的 HTML（书签解析只取文本，内置 SVG 图标仅来自常量表）；壁纸上传仅接受经格式和大小校验的图片，不提供 R2、任意文件上传或服务端外部图片代理；用量监控只访问固定的两个上游地址（`api.cloudflare.com`、`api.deepseek.com`），拒绝重定向并有 10 秒超时与 256 KiB 响应体上限，上游错误信息经脱敏截断后才会展示 |
 
 **修改密码**：成功后撤销**包括当前设备在内**的全部会话，服务端返回清除 Cookie，前端立即跳回登录页要求重新登录。
 
@@ -292,8 +314,12 @@ Pbkdf2 failed: iteration counts above 100000 are not supported
 | GET | `/api/backup` | 导出 JSON 备份（不含任何认证信息） |
 | POST | `/api/restore` | 校验后原子恢复备份 |
 | POST | `/api/import` | 导入书签（服务端再次校验并去重） |
+| GET | `/api/usage` | 读取用量监控状态与缓存（**不**触发上游取数） |
+| POST | `/api/usage/refresh` | 取数并返回最新状态：`{}` 只刷新缺失 / 过期的服务，`{ provider, force: true }` 主动刷新单个服务 |
+| PUT | `/api/usage/providers/:provider` | 保存 `cloudflare` / `deepseek` 的凭据与非敏感配置（`verify: false` 可跳过保存前的上游校验）；凭据始终不回传 |
+| DELETE | `/api/usage/providers/:provider` | 删除该服务的凭据与缓存 |
 
-导航内容写操作的请求体包含当前 `revision`；返回 `409 revision_conflict` 时表示需要刷新后重试。图标缓存独立保存，不改变导航内容版本号。
+导航内容写操作的请求体包含当前 `revision`；返回 `409 revision_conflict` 时表示需要刷新后重试。图标缓存独立保存，不改变导航内容版本号。用量监控同样独立于内容版本号，其接口不使用 `revision`。
 
 ---
 
@@ -312,7 +338,7 @@ Pbkdf2 failed: iteration counts above 100000 are not supported
 }
 ```
 
-备份文件**不包含**密码哈希、会话、CSRF 令牌或 `INIT_SECRET`。
+备份文件**不包含**密码哈希、会话、CSRF 令牌、`INIT_SECRET`、用量监控凭据或用量数据。
 
 自动获取的网站图标属于可重新生成的缓存，不放入 JSON 备份。恢复备份后首次打开页面会重新获取并保存；原有链接的图标类型和自定义图片地址仍随备份恢复。
 
@@ -373,6 +399,8 @@ npm run check:browser -- --init-secret <与 .dev.vars 一致的 INIT_SECRET>   #
 
 集成测试直接调用与线上相同的 `functions/_lib/router.ts`（Workers 与 Pages 共用），并使用真实的 D1（含 `CHECK`/外键约束与事务语义），覆盖：初始化只能一次、并发登录/初始化/改密限流、会话哈希存储、被动读取不续期而显式活动续期、登出与改密撤销（含当前设备）、同源/协议/端口校验、请求体上限、未知字段与危险协议拒绝、分组迁移与级联删除、跨分组排序的原子性与陈旧版本回滚、无变更请求的陈旧版本拒绝、600+ 条链接的批量导入 / 恢复 / 排序在 SQL 预算内完成、300 分组 / 5000 链接的备份往返、接近内容预算边界的多字节 Unicode 导出/恢复往返与超预算回滚、超过 10000 的安全整数排序位置往返、非法恢复、书签导入去重、生产默认 PBKDF2 迭代次数在模拟的托管 100000 上限内完成初始化 / 登录 / 未知用户派生 / 改密，以及 Worker 适配层（精确 `/api` 与 `/api/*` 的 no-store JSON 404、未登录 401、非 API 请求委派给 `ASSETS`）。
 
+用量监控另有一组测试：接口全部要求登录 / CSRF、凭据加密落库且响应与备份都不含明文、保存前的上游校验失败不落库、更换凭据使旧缓存失效、5 分钟 TTL 内复用缓存而超期重新取数、主动刷新的冷却窗口、并发刷新共享租约只请求一次上游、上游错误时保留上次成功数据、删除配置级联清除缓存、未知服务与非法字段一律 400/404、上游响应超限按失败处理、未配置 `USAGE_ENCRYPTION_KEY` 时保存失败关闭（`server_misconfigured`）而读取接口仍可用、恢复导航备份不影响监控配置；前端单元测试覆盖面板只展示已配置的服务、添加 / 删除流程、自动刷新触发条件与数值格式化。
+
 ---
 
 ## 9. 已知边界与说明
@@ -381,7 +409,9 @@ npm run check:browser -- --init-secret <与 .dev.vars 一致的 INIT_SECRET>   #
 - **自动图标持久保存**：「自动」模式下，已保存链接的公开域名由 Worker 从固定的 Google / DuckDuckGo 图标服务获取图标，经校验后保存到现有 D1。后续打开页面、换设备登录只读取本站保存的图片，不再次请求外部图标服务。成功保存的图片不自动过期；编辑模式下点击「刷新图标」可更新，更新失败保留原图。更换链接域名会重新获取，删除链接会删除对应缓存。无需 R2 或新增密钥。
 - **网站图标模式与图标边界**：「网站图标」模式留空时由浏览器按站点 favicon 候选顺序加载，不保存到本站缓存，也没有缓存刷新按钮；填写地址时只加载该图片。「自动」模式对内网地址或不支持缓存的地址也由浏览器加载 favicon 候选。公开域名的自动图标服务只接收域名，不包含链接路径、查询参数、端口或账号信息；单张缓存图标上限 64 KiB。缓存获取失败会暂缓重试并显示名称首字。新增 / 编辑时尚未保存的预览可能直接访问网站或外部图标服务。内置图标无需网络获取。外部服务可能不可用或返回通用图标，无法保证每个网站都有专属图标，可改用内置图标或自定义图片。
 - **壁纸上传与裁切**：管理员可在「外观样式」上传 JPEG、PNG 或 WebP 壁纸，在电脑和手机预览中分别调整水平位置、垂直位置和缩放。浏览器会先将原图压缩至 1 MB 以内，再与设置一起保存到 D1；上传图片仅向已登录用户提供。原有壁纸网址仍可使用。
-- **部署已有站点**：更新现有 Worker 时，在关联的部署仓库推送代码，部署流程需要执行尚未应用的 D1 迁移（包括 `0005_wallpaper.sql` 和 `0006_icon_cache.sql`）。部署命令为 `npm run deploy` 时会在发布前自动迁移；手动发布请先执行 `npm run db:migrate:remote`。无需更改真实 database ID、新建数据库或开通 R2。本地预览需要先执行 `npm run db:migrate:local`。JSON 备份包含上传的壁纸；旧备份仍可恢复。
+- **部署已有站点**：更新现有 Worker 时，在关联的部署仓库推送代码，部署流程需要执行尚未应用的 D1 迁移（包括 `0005_wallpaper.sql`、`0006_icon_cache.sql` 和 `0007_usage_monitor.sql`）。部署命令为 `npm run deploy` 时会在发布前自动迁移；手动发布请先执行 `npm run db:migrate:remote`。无需更改真实 database ID、新建数据库或开通 R2。本地预览需要先执行 `npm run db:migrate:local`。JSON 备份包含上传的壁纸；旧备份仍可恢复。
+- **用量监控的边界**：Cloudflare 的请求 / 错误统计来自官方 GraphQL Analytics API 的 `workersInvocationsAdaptive`（官方标注为 beta），存在采样与聚合延迟，最后几分钟的数据可能尚未计入，也不返回精确账单金额；如果上游返回行数达到查询上限（10000），卡片会提示统计可能不完整。免费套餐的每日 100,000 次请求额度按 **UTC 当日**重置，且套餐由你自己在界面中选择（接口无法判断）。DeepSeek 只提供账户余额接口，没有账号级用量接口，因此不展示累计 Token 消耗或消费曲线。两者都只能配置一个账号 / 一份凭据，没有历史曲线与告警。
+- **用量监控凭据的运维**：凭据以 `USAGE_ENCRYPTION_KEY` 加密保存（AES-GCM，密钥材料经 SHA-256 派生）。更换该密钥后旧密文无法解密，需要在面板中重新保存一次；删除配置会连同缓存一起清除。应用层 JSON 备份不含凭据，但 D1 的底层快照 / 导出仍会包含凭据密文，请按需控制数据库导出权限。
 - **拖拽与触屏**：分组与链接的 HTML5 拖放主要面向鼠标；触屏与键盘用户请使用分组的上移/下移按钮、卡片的上移/下移/编辑（编辑弹窗中可切换分组）按钮，功能完全等价。
 - **容量上限**：最多 300 个分组、5000 条链接；全部内容（分组 + 链接 + 设置）的紧凑 JSON 总量上限 10 MiB，单次备份恢复 / 导入请求体积上限 20 MiB。超限的导入 / 恢复会在事务内被拒绝并回滚，不会出现超预算数据或半截写入；由于 10 MiB 内容加 pretty 导出空白仍远低于 20 MiB，任何成功保存的内容都能被导出并再次恢复。
 - **compatibility date**：`wrangler.jsonc`（Workers）与 `wrangler.pages.jsonc`（Pages）都使用 2026-09-15（由 wrangler 捆绑的 workerd 提供）；vitest 测试池捆绑的 workerd 最高支持 2026-08-15，因此 `vitest.workers.config.ts` 单独使用后者，二者仅相差一个月，API 行为一致。
